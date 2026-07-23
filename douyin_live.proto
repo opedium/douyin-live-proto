@@ -1,0 +1,1589 @@
+// ──────────────────────────────────────────────────────────────
+// douyin_live.proto — 抖音直播间 WebSocket 全量 Protobuf 定义
+//
+// 来源：抖音 Web 端 WebSocket 协议逆向工程
+// 覆盖：传输层 + 通用层 + 业务层（85+ 种消息类型）
+// ──────────────────────────────────────────────────────────────
+
+syntax = "proto3";
+
+package douyin.live;
+
+// ══════════════════════════════════════════════════════════════
+// 传输层 — WebSocket 帧封装
+// ══════════════════════════════════════════════════════════════
+
+// PushFrame: WebSocket 传输帧，心跳包和消息包共用此结构。
+//   payload_type = "hb" 表示心跳包
+//   payload = gzip 压缩的 Response 序列化数据（消息包）
+message PushFrame {
+  uint64 seq_id          = 1;
+  uint64 log_id          = 2;
+  uint64 service         = 3;
+  uint64 method          = 4;
+  repeated HeadersList headers_list    = 5;
+  string payload_encoding              = 6;
+  string payload_type                  = 7;  // "hb" 为心跳，其他为消息
+  bytes  payload                       = 8;  // gzip(Response) 或空
+}
+
+// HeadersList: 通用键值对头部字段
+message HeadersList {
+  string key   = 1;
+  string value = 2;
+}
+
+// Response: WebSocket 响应体，包含消息列表和 ACK 控制字段
+message Response {
+  repeated Message messages_list       = 1;
+  string cursor                        = 2;
+  uint64 fetch_interval                = 3;
+  uint64 now                           = 4;
+  string internal_ext                  = 5;  // ACK 回送数据载荷
+  uint32 fetch_type                    = 6;
+  map<string, string> route_params     = 7;
+  uint64 heartbeat_duration            = 8;
+  bool   need_ack                      = 9;
+  string push_server                   = 10;
+  string live_cursor                   = 11;
+  bool   history_no_more               = 12;
+}
+
+// Message: WebSocket 单条消息封装（嵌入 PushFrame.payload 解压后的 Response 中）
+//   method  ⇒ 消息类型标识（如 'WebcastChatMessage'），用于分发
+//   payload ⇒ protobuf 序列化的业务消息体
+message Message {
+  string method                        = 1;
+  bytes  payload                       = 2;
+  int64  msg_id                        = 3;
+  int32  msg_type                      = 4;
+  int64  offset                        = 5;
+  bool   need_wrds_store               = 6;
+  int64  wrds_version                  = 7;
+  string wrds_sub_key                  = 8;
+}
+
+// ══════════════════════════════════════════════════════════════
+// 通用层 — Image / Text / User / Common（被所有业务消息复用）
+// ══════════════════════════════════════════════════════════════
+
+// Image: 图片资源，包含多分辨率 URL 列表
+message Image {
+  repeated string url_list_list        = 1;
+  string uri                           = 2;
+  uint64 height                        = 3;
+  uint64 width                         = 4;
+  string avg_color                     = 5;
+  uint32 image_type                    = 6;
+  string open_web_url                  = 7;
+  ImageContent content                 = 8;
+  bool   is_animated                   = 9;
+  NinePatchSetting flex_setting_list   = 10;
+  NinePatchSetting text_setting_list   = 11;
+}
+
+// NinePatchSetting: 九宫格图片设置
+message NinePatchSetting {
+  repeated string setting_list_list    = 1;
+}
+
+// ImageContent: 图片内嵌文本内容
+message ImageContent {
+  string name                          = 1;
+  string font_color                    = 2;
+  uint64 level                         = 3;
+  string alternative_text              = 4;
+}
+
+// TextFormat: 文本格式（颜色、加粗、字号等）
+message TextFormat {
+  string color                         = 1;
+  bool   bold                          = 2;
+  bool   italic                        = 3;
+  uint32 weight                        = 4;
+  uint32 italic_angle                  = 5;
+  uint32 font_size                     = 6;
+  bool   use_heigh_light_color         = 7;
+  bool   use_remote_clor               = 8;
+}
+
+// TextPieceUser: 富文本中的用户引用片段
+message TextPieceUser {
+  User   user                          = 1;
+  bool   with_colon                    = 2;
+}
+
+// TextPieceGift: 富文本中的礼物引用片段
+message TextPieceGift {
+  uint64    gift_id                    = 1;
+  PatternRef name_ref                  = 2;
+}
+
+// PatternRef: 模板引用（用于动态拼接文本）
+message PatternRef {
+  string key                           = 1;
+  string default_pattern               = 2;
+}
+
+// TextPieceHeart: 富文本中的爱心片段
+message TextPieceHeart {
+  string color                         = 1;
+}
+
+// TextPiecePatternRef: 富文本中的模板引用片段
+message TextPiecePatternRef {
+  string key                           = 1;
+  string default_pattern               = 2;
+}
+
+// TextPieceImage: 富文本中的图片片段
+message TextPieceImage {
+  Image image                          = 1;
+  float scaling_rate                   = 2;
+}
+
+// TextPiece: 富文本的单个片段
+message TextPiece {
+  bool        type                     = 1;
+  TextFormat  format                   = 2;
+  string      string_value             = 3;
+  TextPieceUser    user_value          = 4;
+  TextPieceGift    gift_value          = 5;
+  TextPieceHeart   heart_value         = 6;
+  TextPiecePatternRef pattern_ref_value = 7;
+  TextPieceImage   image_value         = 8;
+}
+
+// Text: 富文本容器，由多个 TextPiece 拼接而成
+message Text {
+  string      key                      = 1;
+  string      default_patter           = 2;
+  TextFormat  default_format           = 3;
+  repeated TextPiece pieces_list       = 4;
+}
+
+// FollowInfo: 用户关注信息
+message FollowInfo {
+  uint64 following_count               = 1;
+  uint64 follower_count                = 2;
+  uint64 follow_status                 = 3;
+  uint64 push_status                   = 4;
+  string remark_name                   = 5;
+  string follower_count_str            = 6;
+  string following_count_str           = 7;
+}
+
+// GradeIcon: 等级图标
+message GradeIcon {
+  Image icon                           = 1;
+  int64 icon_diamond                   = 2;
+  int64 level                          = 3;
+  string level_str                     = 4;
+}
+
+// GradeBuffInfo: 等级增益信息
+message GradeBuffInfo {
+}
+
+// PayGrade: 用户消费等级详情
+message PayGrade {
+  int64  total_diamond_count           = 1;
+  Image  diamond_icon                  = 2;
+  string name                          = 3;
+  Image  icon                          = 4;
+  string next_name                     = 5;
+  int64  level                         = 6;
+  Image  next_icon                     = 7;
+  int64  next_diamond                  = 8;
+  int64  now_diamond                   = 9;
+  int64  this_grade_min_diamond        = 10;
+  int64  this_grade_max_diamond        = 11;
+  int64  pay_diamond_bak               = 12;
+  string grade_describe                = 13;
+  repeated GradeIcon grade_icon_list   = 14;
+  int64  screen_chat_type              = 15;
+  Image  im_icon                       = 16;
+  Image  im_icon_with_level            = 17;
+  Image  live_icon                     = 18;
+  Image  new_im_icon_with_level        = 19;
+  Image  new_live_icon                 = 20;
+  int64  upgrade_need_consume          = 21;
+  string next_privileges               = 22;
+  Image  background                    = 23;
+  Image  background_back               = 24;
+  int64  score                         = 25;
+  GradeBuffInfo buff_info              = 26;
+  string grade_banner                  = 1001;
+  Image  profile_dialog_bg             = 1002;
+  Image  profile_dialog_bg_back        = 1003;
+}
+
+// UserBadge: 用户徽章
+message UserBadge {
+  map<int32, Image> icons              = 1;
+  string title                         = 2;
+}
+
+// FansClubData: 粉丝团数据（单个主播的粉丝团）
+message FansClubData {
+  string club_name                     = 1;
+  int32  level                         = 2;
+  int32  user_fans_club_status         = 3;
+  UserBadge badge                      = 4;
+  repeated int64 available_gift_ids    = 5;
+  int64  anchor_id                     = 6;
+}
+
+// FansClub: 粉丝团容器（支持多主播粉丝团）
+message FansClub {
+  FansClubData data                    = 1;
+  map<int32, FansClubData> prefer_data = 2;
+}
+
+// User: 用户信息，被所有业务消息引用
+message User {
+  uint64 id                            = 1;
+  uint64 short_id                      = 2;
+  string nick_name                     = 3;
+  uint32 gender                        = 4;
+  string signature                     = 5;
+  uint32 level                         = 6;
+  uint64 birthday                      = 7;
+  string telephone                     = 8;
+  Image  avatar_thumb                  = 9;
+  Image  avatar_medium                 = 10;
+  Image  avatar_large                  = 11;
+  bool   verified                      = 12;
+  uint32 experience                    = 13;
+  string city                          = 14;
+  int32  status                        = 15;
+  uint64 create_time                   = 16;
+  uint64 modify_time                   = 17;
+  uint32 secret                        = 18;
+  string share_qrcode_uri              = 19;
+  uint32 income_share_percent          = 20;
+  repeated Image badge_image_list      = 21;
+  FollowInfo follow_info               = 22;
+  PayGrade  pay_grade                  = 23;
+  FansClub  fans_club                  = 24;
+  string special_id                    = 26;
+  Image  avatar_border                 = 27;
+  Image  medal                         = 28;
+  repeated Image real_time_icons_list  = 29;
+  string display_id                    = 38;
+  string sec_uid                       = 46;
+  uint64 fan_ticket_count              = 1022;
+  string id_str                        = 1028;
+  uint32 age_range                     = 1045;
+
+  // Wire-observed fields (semantics not yet confirmed)
+  string field_32                      = 32;
+  uint32 field_37                      = 37;
+  uint32 field_54                      = 54;
+  uint32 field_55                      = 55;
+  bytes  field_61                      = 61;
+  bytes  field_64                      = 64;
+  uint32 field_66                      = 66;
+  string field_68                      = 68;
+  string field_69                      = 69;
+  string field_70                      = 70;
+  string field_73                      = 73;  // Used for anonymous user cross-linking
+  bytes  field_78                      = 78;
+}
+
+// Common: 公共字段，被所有业务消息引用
+message Common {
+  string method                        = 1;
+  uint64 msg_id                        = 2;
+  uint64 room_id                       = 3;
+  uint64 create_time                   = 4;  // 秒级时间戳
+  uint32 monitor                       = 5;
+  bool   is_show_msg                   = 6;
+  string describe                      = 7;
+  bytes  display_text                  = 8;  // 嵌套 Text 对象（主播展示用）
+  uint64 fold_type                     = 9;
+  uint64 anchor_fold_type              = 10;
+  uint64 priority_score                = 11;
+  string log_id                        = 12;
+  string msg_process_filter_k          = 13;
+  string msg_process_filter_v          = 14;
+  User   user                          = 15;
+  uint64 anchor_fold_type_v2           = 17;
+  uint64 process_at_sei_time_ms        = 18;
+  uint64 random_dispatch_ms            = 19;
+  bool   is_dispatch                   = 20;
+  uint64 channel_id                    = 21;
+  uint64 diff_sei2abs_second           = 22;
+  uint64 anchor_fold_duration          = 23;
+  uint64 field_24                      = 24;  // version/fold flag (1128)
+}
+
+// PublicAreaCommon: 公共区域通用字段
+message PublicAreaCommon {
+  Image  user_label                    = 1;
+  uint64 user_consume_in_room          = 2;
+  uint64 user_send_gift_cnt_in_room    = 3;
+}
+
+// LandscapeAreaCommon: 横屏模式下的公共区域字段
+message LandscapeAreaCommon {
+  bool   show_head                     = 1;
+  bool   show_nickname                 = 2;
+  bool   show_font_color               = 3;
+  repeated string color_value_list     = 4;
+  repeated int32  comment_type_tags_list = 5;
+}
+
+// EffectConfig: 进场/关注等特效配置
+message EffectConfig {
+  uint64 type                          = 1;
+  Image  icon                          = 2;
+  uint64 avatar_pos                    = 3;
+  Text   text                          = 4;
+  Image  text_icon                     = 5;
+  uint32 stay_time                     = 6;
+  uint64 anim_asset_id                 = 7;
+  Image  badge                         = 8;
+  repeated uint64 flex_setting_array_list = 9;
+  Image  text_icon_overlay             = 10;
+  Image  animated_badge                = 11;
+  bool   has_sweep_light               = 12;
+  repeated uint64 text_flex_setting_array_list = 13;
+  uint64 center_anim_asset_id          = 14;
+  Image  dynamic_image                 = 15;
+  map<string, string> extra_map        = 16;
+  uint64 mp4_anim_asset_id             = 17;
+  uint64 priority                      = 18;
+  uint64 max_wait_time                 = 19;
+  string dress_id                      = 20;
+  uint64 alignment                     = 21;
+  uint64 alignment_offset              = 22;
+}
+
+// ══════════════════════════════════════════════════════════════
+// 业务层 — 核心消息类型
+// ══════════════════════════════════════════════════════════════
+
+// ─── 弹幕消息 ───────────────────────────────────────
+
+// ChatMessage: 弹幕消息（chat_by == 9 时为福袋口令）
+message ChatMessage {
+  Common common                        = 1;
+  User   user                          = 2;
+  string content                       = 3;
+  bool   visible_to_sender             = 4;
+  Image  background_image              = 5;
+  string full_screen_text_color        = 6;
+  Image  background_image_v2           = 7;
+  PublicAreaCommon public_area_common  = 9;
+  Image  gift_image                    = 10;
+  uint64 agree_msg_id                  = 11;
+  uint32 priority_level                = 12;
+  LandscapeAreaCommon landscape_area_common = 13;
+  uint64 event_time                    = 15;
+  bool   send_review                   = 16;
+  bool   from_intercom                 = 17;
+  bool   intercom_hide_user_card       = 18;
+  uint32 chat_by                       = 20;
+  uint32 individual_chat_priority      = 21;
+  Text   rtf_content                   = 22;
+}
+
+// EmojiChatMessage: 表情消息
+message EmojiChatMessage {
+  Common common                        = 1;
+  User   user                          = 2;
+  int64  emoji_id                      = 3;
+  Text   emoji_content                 = 4;
+  string default_content               = 5;
+  Image  background_image              = 6;
+  bool   from_intercom                 = 7;
+  bool   intercom_hide_user_card       = 8;
+}
+
+// ScreenChatMessage: 醒目留言/屏幕聊天（付费 spotlight 弹幕）
+message ScreenChatMessage {
+  Common common                        = 1;
+  User   user                          = 2;
+  string content                       = 3;
+  uint64 event_time                    = 4;
+  PublicAreaCommon public_area_common  = 10;
+  uint64 priority_score                = 12;
+  bytes  field_32                      = 32;  // rtf content
+}
+
+// HotChatMessage: "大家都在说" 话题建议
+message HotChatMessage {
+  Common common                        = 1;
+  string title                         = 2;
+  string content                       = 3;
+  bytes  field_4                       = 4;
+  uint32 field_5                       = 5;
+  bytes  field_6                       = 6;
+  uint64 event_time                    = 7;
+  bytes  field_11                      = 11;
+  bytes  field_200                     = 200;  // tag map
+}
+
+// EpisodeChatMessage: 剧集聊天消息（可能已废弃）
+message EpisodeChatMessage {
+  Message common                       = 1;  // 注意：此处为 Message 类型而非 Common
+  User   user                          = 2;
+  string content                       = 3;
+  bool   visible_to_sende              = 4;
+  Image  gift_image                    = 7;
+  uint64 agree_msg_id                  = 8;
+  repeated string color_value_list     = 9;
+}
+
+// CommonTextMessage: 通用文本消息
+message CommonTextMessage {
+  Common common                        = 1;
+  User   user                          = 2;
+  string scene                         = 3;
+}
+
+// ─── 礼物消息 ───────────────────────────────────────
+
+// GiftStruct: 礼物结构体
+message GiftStruct {
+  Image  image                         = 1;
+  string describe                      = 2;
+  bool   notify                        = 3;
+  uint64 duration                      = 4;
+  uint64 id                            = 5;
+  bool   for_linkmic                   = 7;
+  bool   doodle                        = 8;
+  bool   for_fansclub                  = 9;
+  bool   combo                         = 10;
+  uint32 type                          = 11;
+  uint32 diamond_count                 = 12;
+  bool   is_displayed_on_panel         = 13;
+  uint64 primary_effect_id             = 14;
+  Image  gift_label_icon               = 15;
+  string name                          = 16;
+  string region                        = 17;
+  string manual                        = 18;
+  bool   for_custom                    = 19;
+  Image  icon                          = 21;
+  uint32 action_type                   = 22;
+
+  // Extended gift metadata (wire-observed)
+  uint32 display_index                 = 28;  // gift panel sort order
+  uint64 fold_type                     = 38;  // 1128=normal
+  uint32 gift_category_id              = 42;  // 753=fan badge
+  string gift_label                    = 44;  // "粉丝","限定","热门"
+  uint32 display_strategy              = 48;  // 3=normal
+  string scheme_url                    = 52;
+  uint32 gift_source                   = 54;  // 1=normal panel
+  bytes  banner                        = 55;  // panel banner images
+  bytes  tag_images                    = 56;  // tag image assets
+  bytes  gift_tag                      = 57;
+  uint32 sub_type                      = 63;
+  bytes  anchor_gift_data              = 74;
+}
+
+// GiftIMPriority: 礼物 IM 优先级
+message GiftIMPriority {
+  repeated uint64 queue_sizes_list     = 1;
+  uint64 self_queue_priority           = 2;
+  uint64 priority                      = 3;
+}
+
+// TextEffectDetail: 文字特效详情
+message TextEffectDetail {
+  Text   text                          = 1;
+  uint32 text_font_size                = 2;
+  Image  background                    = 3;
+  uint32 start                         = 4;
+  uint32 duration                      = 5;
+  uint32 x                             = 6;
+  uint32 y                             = 7;
+  uint32 width                         = 8;
+  uint32 height                        = 9;
+  uint32 shadow_dx                     = 10;
+  uint32 shadow_dy                     = 11;
+  uint32 shadow_radius                 = 12;
+  string shadow_color                  = 13;
+  string stroke_color                  = 14;
+  uint32 stroke_width                  = 15;
+}
+
+// TextEffect: 文字特效（横屏/竖屏两套配置）
+message TextEffect {
+  TextEffectDetail portrait            = 1;
+  TextEffectDetail landscape           = 2;
+}
+
+// GiftMessage: 礼物赠送消息
+message GiftMessage {
+  Common common                        = 1;
+  uint64 gift_id                       = 2;
+  uint64 fan_ticket_count              = 3;
+  uint64 group_count                   = 4;
+  uint64 repeat_count                  = 5;
+  uint64 combo_count                   = 6;
+  User   user                          = 7;
+  User   to_user                       = 8;
+  uint32 repeat_end                    = 9;
+  TextEffect text_effect               = 10;
+  uint64 group_id                      = 11;
+  uint64 income_taskgifts              = 12;
+  uint64 room_fan_ticket_count         = 13;
+  GiftIMPriority priority              = 14;
+  GiftStruct gift                      = 15;
+  string log_id                        = 16;
+  uint64 send_type                     = 17;
+  PublicAreaCommon public_area_common  = 18;
+  Text   tray_display_text             = 19;
+  uint64 banned_display_effects        = 20;
+  bool   display_for_self              = 25;
+  string interact_gift_info            = 26;
+  string diy_item_info                 = 27;
+  repeated uint64 min_asset_set_list   = 28;
+  uint64 total_count                   = 29;
+  uint32 client_gift_source            = 30;
+  repeated uint64 to_user_ids_list     = 32;
+  uint64 send_time                     = 33;
+  uint64 force_display_effects         = 34;
+  string trace_id                      = 35;
+  uint64 effect_display_ts             = 36;
+
+  // Wire-observed fields (unnamed)
+  bytes  field_21                      = 21;
+  bytes  field_31                      = 31;
+  bytes  field_39                      = 39;
+  uint32 field_43                      = 43;
+  string field_45                      = 45;
+}
+
+// LightGiftInfo: 轻礼物详情
+message LightGiftInfo {
+  uint64 gift_id                       = 1;
+  Image  image                         = 2;
+  uint64 diamond_count                 = 3;
+}
+
+// LightGiftMessage: 轻礼物消息（快捷礼物、粉丝团礼物、人气票等）
+message LightGiftMessage {
+  Common common                        = 1;
+  uint64 msg_type                      = 2;  // 1
+  uint64 version                       = 3;  // 1
+  uint64 user_id                       = 5;
+  LightGiftInfo gift_info              = 7;
+  bytes  unknown_8                     = 8;  // 3B
+  uint64 display_style                 = 9;  // 1
+  uint64 count                         = 10; // 1
+  uint64 unknown_12                    = 12; // 2
+  bytes  extra_data                    = 13; // 15B
+}
+
+// GiftSortMessage: 礼物排序/展示模式更新
+message GiftSortMessage {
+  Common common                        = 1;
+  uint32 sort_type                     = 2;  // 3
+  string scene_config                  = 4;  // 展示场景配置
+}
+
+// GiftUpdateMessage: 礼物更新消息
+message GiftUpdateMessage {
+  Common common                        = 1;
+}
+
+// ─── 进场/关注/点赞消息 ────────────────────────────
+
+// MemberMessage: 进场消息
+message MemberMessage {
+  Common common                        = 1;
+  User   user                          = 2;
+  uint64 member_count                  = 3;
+  User   operator                      = 4;
+  bool   is_set_to_admin               = 5;
+  bool   is_top_user                   = 6;
+  uint64 rank_score                    = 7;
+  uint64 top_user_no                   = 8;
+  uint64 enter_type                    = 9;
+  uint64 action                        = 10;
+  string action_description            = 11;
+  uint64 user_id                       = 12;
+  EffectConfig effect_config           = 13;
+  string pop_str                       = 14;
+  EffectConfig enter_effect_config     = 15;
+  Image  background_image              = 16;
+  Image  background_image_v2           = 17;
+  Text   anchor_display_text           = 18;
+  PublicAreaCommon public_area_common  = 19;
+  uint64 user_enter_tip_type           = 20;
+  uint64 anchor_enter_tip_type         = 21;
+}
+
+// SocialMessage: 关注/分享消息（action=1 关注，action=2 分享）
+message SocialMessage {
+  Common common                        = 1;
+  User   user                          = 2;
+  uint64 share_type                    = 3;
+  uint64 action                        = 4;
+  string share_target                  = 5;
+  uint64 follow_count                  = 6;
+  PublicAreaCommon public_area_common  = 7;
+}
+
+// LikeMessage: 点赞消息
+message LikeMessage {
+  Common            common             = 1;
+  uint64            count              = 2;
+  uint64            total              = 3;
+  uint64            color              = 4;
+  User              user               = 5;
+  string            icon               = 6;
+  DoubleLikeDetail  double_like_detail = 7;
+  DisplayControlInfo display_control_info = 8;
+  uint64            linkmic_guest_uid  = 9;
+  string            scene              = 10;
+  PicoDisplayInfo   pico_display_info  = 11;
+}
+
+// DoubleLikeDetail: 双击点赞详情
+message DoubleLikeDetail {
+  bool   double_flag                   = 1;
+  uint32 seq_id                        = 2;
+  uint32 renewals_num                  = 3;
+  uint32 triggers_num                  = 4;
+}
+
+// DisplayControlInfo: 显示控制信息
+message DisplayControlInfo {
+  bool show_text                       = 1;
+  bool show_icons                      = 2;
+}
+
+// PicoDisplayInfo: 点赞累计显示信息
+message PicoDisplayInfo {
+  uint64 combo_sum_count               = 1;
+  string emoji                         = 2;
+  Image  emoji_icon                    = 3;
+  string emoji_text                    = 4;
+}
+
+// ChatLikeCountInfo: 聊天点赞计数信息
+message ChatLikeCountInfo {
+  uint64 count                         = 1;
+  uint64 timestamp                     = 2;
+}
+
+// ChatLikeEntry: 聊天消息点赞中的单条记录
+message ChatLikeEntry {
+  uint64 message_id                    = 1;
+  ChatLikeCountInfo count_info         = 2;
+}
+
+// ChatLikeMessage: 聊天消息点赞
+message ChatLikeMessage {
+  Common common                        = 1;
+  repeated ChatLikeEntry entries       = 2;
+}
+
+// ─── 粉丝团/粉丝票消息 ─────────────────────────────
+
+// FansclubMessage: 粉丝团消息（加入/升级）
+message FansclubMessage {
+  Common common_info                   = 1;
+  int32  type                          = 2;
+  string content                       = 3;
+  User   user                          = 4;
+}
+
+// UpdateFanTicketMessage: 粉丝票更新消息
+message UpdateFanTicketMessage {
+  Common common                        = 1;
+  string room_fan_ticket_count_text    = 2;
+  uint64 room_fan_ticket_count         = 3;
+  bool   force_update                  = 4;
+}
+
+// ─── 直播间状态消息 ────────────────────────────────
+
+// RoomUserSeqMessageContributor: 在线统计中的单个用户贡献者
+message RoomUserSeqMessageContributor {
+  uint64 score                         = 1;
+  User   user                          = 2;
+  uint64 rank                          = 3;
+  uint64 delta                         = 4;
+  bool   is_hidden                     = 5;
+  string score_description             = 6;
+  string exactly_score                 = 7;
+}
+
+// RoomUserSeqMessage: 实时在线人数统计消息
+message RoomUserSeqMessage {
+  Common common                        = 1;
+  repeated RoomUserSeqMessageContributor ranks_list   = 2;
+  int64  total                         = 3;
+  string pop_str                       = 4;
+  repeated RoomUserSeqMessageContributor seats_list   = 5;
+  int64  popularity                    = 6;
+  int64  total_user                    = 7;
+  string total_user_str                = 8;
+  string total_str                     = 9;
+  string online_user_for_anchor        = 10;
+  string total_pv_for_anchor           = 11;
+  string up_right_stats_str            = 12;
+  string up_right_stats_str_complete   = 13;
+}
+
+// RoomStatsMessage: 直播累计统计消息（观看人次等）
+message RoomStatsMessage {
+  Common common                        = 1;
+  string display_short                 = 2;
+  string display_middle                = 3;
+  string display_long                  = 4;
+  int64  display_value                 = 5;
+  int64  display_version               = 6;
+  bool   incremental                   = 7;
+  bool   is_hidden                     = 8;
+  int64  total                         = 9;
+  int64  display_type                  = 10;
+}
+
+// RoomMessageStatusFlags: 直播间状态标志（field 7 载体）
+message RoomMessageStatusFlags {
+  uint64 field_4                       = 4;  // 50 (fold type?)
+  uint64 field_8                       = 8;  // 1 or 2
+}
+
+// RoomMessage: 直播间公告消息（置顶、场景、会员订阅等）
+message RoomMessage {
+  Common common                        = 1;
+  string content                       = 2;
+  bool   supprot_landscape             = 3;
+  int32  roommessagetype               = 4;
+  bool   system_top_msg                = 5;
+  bool   forced_guarantee              = 6;
+  RoomMessageStatusFlags status_flags  = 7;
+  string biz_scene                     = 20; // "live_recommend"
+  map<string, string> buried_point_map = 30;
+}
+
+// ControlMessage: 直播控制消息（status=1 开始/2 暂停/3 已结束）
+message ControlMessage {
+  Common common                        = 1;
+  int32  status                        = 2;
+}
+
+// RoomStreamAdaptationMessage: 流配置消息（自适应分辨率）
+message RoomStreamAdaptationMessage {
+  Common common                        = 1;
+  int32  adaptation_type               = 2;
+  float  adaptation_height_ratio       = 3;
+  float  adaptation_body_center_ratio  = 4;
+}
+
+// ─── 排行榜消息 ────────────────────────────────────
+
+// RoomRankMessageRoomRank: 排行榜中的单个用户排名
+message RoomRankMessageRoomRank {
+  User   user                          = 1;
+  string score_str                     = 2;
+  bool   profile_hidden                = 3;
+}
+
+// RoomRankMessage: 积分排行榜消息
+message RoomRankMessage {
+  Common common                        = 1;
+  repeated RoomRankMessageRoomRank ranks_list = 2;
+}
+
+// RankTabHeader: 排行榜标签页（名称+分数阈值）
+message RankTabHeader {
+  // Internal sub-fields of the container at field 2
+  // Used within RanklistHourEntranceMessage
+}
+
+// RanklistHourEntranceMessage: 小时榜入口消息
+message RanklistHourEntranceMessage {
+  Common common                        = 1;
+  bytes  rank_data                     = 2;  // Proto: 含多个 RankTabHeader + Top N 用户列表
+}
+
+// ─── 电商/购物消息 ────────────────────────────────
+
+// LiveShoppingMessage: 直播购物消息
+message LiveShoppingMessage {
+  Common common                        = 1;
+  int32  msg_type                      = 2;
+  int64  promotion_id                  = 4;
+}
+
+// ProductInfo: 商品信息
+message ProductInfo {
+  int64  promotion_id                  = 1;
+  int32  index                         = 2;
+  repeated int64 target_flash_uids_list = 3;
+  int64  explain_type                  = 4;
+}
+
+// CategoryInfo: 商品分类信息
+message CategoryInfo {
+  int32  id                            = 1;
+  string name                          = 2;
+  repeated int64 promotion_ids_list    = 3;
+  string type                          = 4;
+  string unique_index                  = 5;
+}
+
+// ProductChangeMessage: 商品变更消息
+message ProductChangeMessage {
+  Common common                        = 1;
+  int64  update_timestamp              = 2;
+  string update_toast                  = 3;
+  repeated ProductInfo update_product_info_list   = 4;
+  int64  total                         = 5;
+  repeated CategoryInfo update_category_info_list = 8;
+}
+
+// ─── 赛事/剧集消息 ────────────────────────────────
+
+// Against: 赛事对阵信息
+message Against {
+  string left_name                     = 1;
+  Image  left_logo                     = 2;
+  string left_goal                     = 3;
+  string right_name                    = 6;
+  Image  right_logo                    = 7;
+  string right_goal                    = 8;
+  uint64 timestamp                     = 11;
+  uint64 version                       = 12;
+  uint64 left_team_id                  = 13;
+  uint64 right_team_id                 = 14;
+  uint64 diff_sei2abs_second           = 15;
+  uint32 final_goal_stage              = 16;
+  uint32 current_goal_stage            = 17;
+  uint32 left_score_addition           = 18;
+  uint32 right_score_addition          = 19;
+  uint64 left_goal_int                 = 20;
+  uint64 right_goal_int                = 21;
+}
+
+// MatchAgainstScoreMessage: 赛事比分消息
+message MatchAgainstScoreMessage {
+  Common common                        = 1;
+  Against against                      = 2;
+  uint32 match_status                  = 3;
+  uint32 display_status                = 4;
+}
+
+// ══════════════════════════════════════════════════════════════
+// 业务层 — PK/连麦战斗消息
+// ══════════════════════════════════════════════════════════════
+
+// ─── PK 方数据容器 ──────────────────────────────
+// BattleTeamData: PK 队伍数据（参赛者列表及详细信息）
+message BattleTeamData {
+  bytes  raw_data                      = 1;  // 包含 User 对象列表 + 状态字段
+}
+
+// BattleConfigInfo: PK 配置信息
+message BattleConfigInfo {
+  string battle_play_mode              = 1;  // JSON: "501"
+  bytes  config_json                   = 2;  // 完整配置 JSON
+}
+
+// ─────────────────────────────────────────────────
+
+// LinkmicBattleMessage: PK 战斗开始/状态更新
+message LinkmicBattleMessage {
+  Common common                        = 1;
+  BattleTeamData battle_data           = 2;  // 4689B: 战斗双方/多方数据
+  uint64 battle_type                   = 5;  // 10
+  repeated BattleTeamData team_members = 6;  // 各队成员列表（~600B each）
+  uint64 field_8                       = 8;  // 1
+  uint64 field_10                      = 10; // 1
+  BattleTeamData extra_data            = 11; // 829B: 额外战斗数据
+  string panel_type                    = 13; // "playmode_panel"
+  BattleConfigInfo config_info         = 14; // JSON 配置
+  string trace_info                    = 15; // JSON: {"trace_id":"..."}
+}
+
+// ─── PK 排行榜单条记录 ──────────────────────────
+// BattleRankEntry: PK 过程中的单用户排名数据
+message BattleRankEntry {
+  bytes  user_data                     = 1;  // 含 User + 分数
+}
+
+// ─────────────────────────────────────────────────
+
+// LinkmicBattleFinishMessage: PK 战斗结束
+message LinkmicBattleFinishMessage {
+  Common common                        = 1;
+  BattleTeamData result_data           = 2;  // 3012B: 结果数据
+  repeated BattleRankEntry rank_entries = 3; // 排名列表（~1500B each）
+  repeated bytes  team_scores          = 4;  // 各队分数（~65B each）
+  bytes  battle_detail                 = 9;  // 战斗详细数据
+  repeated BattleTeamData team_stats   = 12; // 各队统计（~620B each）
+  BattleTeamData summary_data          = 15; // 834B: 汇总数据
+  uint64 total_players                 = 16; // 10: 参与总人数
+  string config_json                   = 18; // JSON: 战斗配置
+  string field_20                      = 20; // 空字符串
+}
+
+// ─── PK 阵营队伍数据 ────────────────────────────
+// BattleArmyTeam: PK 阵营队伍信息
+message BattleArmyTeam {
+  bytes  member_data                   = 1;  // 队伍成员数据
+}
+
+// ─────────────────────────────────────────────────
+
+// LinkmicArmiesMessage: PK 阵营信息
+message LinkmicArmiesMessage {
+  Common common                        = 1;
+  repeated BattleArmyTeam team_a       = 2;  // A 方阵营队伍
+  repeated BattleArmyTeam team_b       = 3;  // B 方阵营队伍
+  string display_title                 = 5;  // "????... ????NO.1"
+}
+
+// ─── 连麦方法消息 ──────────────────────────────
+
+// LinkMicMethodParticipant: 连麦方法中的参赛者/队伍信息
+message LinkMicMethodParticipant {
+  uint64 user_id                       = 1;  // 用户ID (108200)
+  uint64 unique_id                     = 2;  // 唯一ID (1754451614377220)
+  string user_id_str                   = 7;  // 用户ID字符串 "108200"
+  int32  team                          = 8;  // 阵营 (1/2/3/4/5/6)
+  int32  is_captain                    = 9;  // 是否队长 (1)
+  string nickname_id                   = 10; // 昵称ID "109789"
+  uint64 nickname_id_num               = 11; // 昵称ID数值 (109789)
+  int32  user_count                    = 12; // 用户数 (2)
+  uint32 power                         = 17; // 能量值 (180)
+  int32  flag                          = 18; // 标志位 (1)
+  string title                         = 19; // 标题 "领先220992"
+  repeated KeyValuePair title_parts    = 20; // 标题分段
+  string unique_id_str                 = 21; // 唯一ID字符串 "1754451614377220"
+}
+
+// LinkMicMethodMessage: 连麦方法消息（连麦过程中的状态/进度更新）
+// 注意: 此消息同时对应 wire 上的 "WebcastLinkMicMethod" 和 "LinkMicMethod" 方法名
+message LinkMicMethodMessage {
+  Common common                        = 1;
+  int32  status                        = 2;  // 状态码 (202)
+  uint64 field_8                       = 8;  // 相关用户ID
+  repeated LinkMicMethodParticipant participants = 17; // 参赛者列表
+  uint64 field_24                      = 24; // 73147511638
+  string debug_str                     = 82; // 调试时间戳字符串
+  bytes  resource_data                 = 90; // 资源数据（图片URL等）
+  uint64 next_update_time              = 104; // 下次更新时间戳
+  string next_update_time_str          = 114; // 下次更新时间戳字符串
+}
+
+// ─── PK 分数更新 ───────────────────────────────
+// LinkmicPlayModeUpdateScoreMessage: PK 玩法模式分数更新
+message LinkmicPlayModeUpdateScoreMessage {
+  Common common                        = 1;
+  uint64 version                       = 2;  // 1
+  uint64 fold_type                     = 3;  // 1128
+  uint64 room_id                       = 4;  // 房间ID
+  uint64 opponent_user_id_1            = 5;  // 对方用户ID
+  uint64 score_self                    = 6;  // 己方分数
+  uint64 opponent_user_id_2            = 7;  // 对方用户ID 2
+  uint32 field_8                       = 8;  // 3
+  uint32 field_9                       = 9;  // 2
+  string linker_id                     = 10; // "linker_{score}_{opponent_id}"
+  uint64 timestamp_ms                  = 11; // 毫秒时间戳
+  bytes  team_a_detail                 = 15; // 3252B: A 方详情
+  bytes  team_b_detail                 = 16; // 4018B: B 方详情
+}
+
+// ─────────────────────────────────────────────────
+
+// LinkerContributeMessage: PK 贡献信息
+message LinkerContributeMessage {
+  Common common                        = 1;
+  uint64 opponent_id                   = 2;  // 对方用户ID
+  uint64 contribution_amount           = 3;  // 贡献量
+  bytes  display_images                = 4;  // 展示图片（多张）
+  uint64 timestamp_ms                  = 5;  // 毫秒时间戳
+  uint32 field_6                       = 6;  // 7
+  string display_text                  = 7;  // 显示文字 "2.4?"
+  string display_suffix                = 8;  // "100?+"
+  bytes  extra_data                    = 9;  // 11B
+}
+
+// BattleAuxiliaryMessage: 战斗辅助消息
+message BattleAuxiliaryMessage {
+  Common common                        = 1;
+  uint64 aux_type                      = 2;  // wire-observed
+}
+
+// ─── 战斗惩罚详情 ──────────────────────────────
+// PunishmentDetail: 战斗结束惩罚详情
+message PunishmentDetail {
+  bytes  detail_data                   = 1;  // 401B: 含惩罚状态、文本、持续时间等
+}
+
+// ─────────────────────────────────────────────────
+
+// BattleEndPunishMessage: 战斗结束惩罚消息
+message BattleEndPunishMessage {
+  Common common                        = 1;
+  PunishmentDetail punishment_detail   = 2;  // 惩罚详情
+}
+
+// BattlePowerContainerMessage: 战斗力容器消息
+message BattlePowerContainerMessage {
+  Common common                        = 1;
+  uint64 user_id_a                     = 2;  // wire-observed
+  uint64 user_id_b                     = 3;  // wire-observed
+}
+
+// BattleStealDragonPhase: 抢龙战斗的阶段时间轴
+message BattleStealDragonPhase {
+  int32  phase                         = 1;  // 阶段编号 (1,2,3,4)
+  uint64 timestamp                     = 2;  // 开始时间戳（秒）
+  int32  duration                      = 3;  // 持续时间（秒: 10,30,5,5）
+}
+
+// BattleStealDragonDetail: 抢龙战斗详情
+message BattleStealDragonDetail {
+  string activity_id                   = 1;  // "7665559346646373426" 抢龙活动ID
+  int32  phase                         = 2;  // 当前阶段 (3)
+  repeated BattleStealDragonPhase phases = 3; // 全部阶段时间轴
+  bytes  level_config_json             = 6;  // 8KB JSON: 龙等级配置（level, dragon_tail_url等）
+  bytes  notify_config_json            = 7;  // 1KB JSON: 通知配置（抢龙通知、战力值加成等）
+}
+
+// BattleStealDragonMessage: 抢龙战斗消息（PK 特殊玩法）
+message BattleStealDragonMessage {
+  Common common                        = 1;
+  BattleStealDragonDetail battle_detail = 2;
+}
+
+// BattleStatusMessage: 战斗状态同步（PK 双方案情）
+message BattleStatusMessage {
+  Common common                        = 1;
+  string user_id_a                     = 2;  // A方用户ID字符串
+  string user_id_b                     = 3;  // B方用户ID字符串
+  int32  status                        = 4;  // 状态码
+  int64  total_duration                = 6;  // 总时长（秒）
+  int64  remaining_duration            = 7;  // 剩余时长（秒）
+  string start_time                    = 8;  // 开始时间戳
+  string end_time                      = 9;  // 结束时间戳
+}
+
+// BattleTeamTaskMessage: 战斗团队任务消息
+message BattleTeamTaskMessage {
+  Common common                        = 1;
+  bytes  task_data                     = 2;  // 145B: 任务数据
+  string config_json                   = 3;  // JSON: {"config":{"period_config":{...}}}
+}
+
+// BattleEffectContainerMessage: 战斗特效容器
+message BattleEffectContainerMessage {
+  Common common                        = 1;
+  uint64 opponent_1                    = 2;
+  uint64 opponent_2                    = 3;
+  bytes  effect_data                   = 4;
+}
+
+// ══════════════════════════════════════════════════════════════
+// 业务层 — 额外辅助消息类型
+// ══════════════════════════════════════════════════════════════
+
+// LinkChannelFansTag: 连麦用户的粉丝标签
+message LinkChannelFansTag {
+  string display_text                  = 5;  // "100w+粉丝"
+  uint64 timestamp                     = 6;
+  uint32 field_8                       = 8;
+  string title                         = 9;  // "主持"
+  string font_color                    = 10; // "#0000003D"
+  string bg_color                      = 11; // "#FFFFFF"
+  uint32 field_12                      = 12;
+  uint32 field_13                      = 13;
+}
+
+// LinkChannelUserData: 连麦通道中的单个用户完整信息
+// 包含 User 对象 + 连接 token + 粉丝标签
+message LinkChannelUserData {
+  User   user                          = 1;  // 完整用户信息（uid, nick, avatar, pay_grade, fans_club等）
+  string connect_token                 = 3;  // "1_a9eda903796d62fc3c3a333707639708"
+  uint32 field_4                       = 4;
+  LinkChannelFansTag fans_tag          = 11;
+}
+
+// LinkChannelData: 连麦通道数据（field 13 载体）
+// 包含参与连麦的所有用户信息
+message LinkChannelData {
+  repeated LinkChannelUserData user_list = 1;
+  uint64 timestamp                     = 3;  // 秒级时间戳
+}
+
+// LinkChannelParticipant: 连麦等待区的参与者
+message LinkChannelParticipant {
+  uint64 user_id_1                     = 1;
+  LinkChannelUserData user_data        = 2;
+  uint64 user_id_2                     = 3;
+}
+
+// LinkMessage: 连麦通道管理消息
+message LinkMessage {
+  Common common                        = 1;
+  uint32 link_type                     = 2;  // 11
+  uint64 channel_id                    = 3;
+  uint32 link_action                   = 4;  // 7=更新
+  repeated LinkChannelParticipant participants = 5;  // 连麦等待区参与者列表
+  LinkChannelData channel_data         = 13; // 通道内用户列表（含完整User）
+  uint32 field_199                     = 199;
+  uint64 event_time                    = 203; // 毫秒时间戳
+}
+
+// AssetEffectUtilMessage: 资产特效工具消息（星守护入场等）
+message AssetEffectUtilMessage {
+  Common common                        = 1;
+  uint64 field_2                       = 2;
+  uint32 field_3                       = 3;
+  bytes  effect_text                   = 5;
+  uint32 field_6                       = 6;
+  uint32 field_7                       = 7;
+  string effect_source                 = 8;  // JSON: {"effect_source":"star_guard"}
+  string target_user_id                = 9;
+  bytes  field_22                      = 22;
+}
+
+// RoomDataSyncMessage: 房间数据同步
+message RoomDataSyncMessage {
+  Common common                        = 1;
+  uint64 room_id                       = 2;
+  string sync_type                     = 3;  // "InteractEffectSyncData"
+  string trace_id                      = 4;
+  bytes  sync_data                     = 5;
+  string request_id                    = 6;
+}
+
+// InRoomBannerMessage: 直播间横幅/推广消息
+message InRoomBannerMessage {
+  Common common                        = 1;
+  string banner_json                   = 2;  // JSON: {"accompany_indicator":{"banner_detail":{...}}}
+  uint32 banner_type                   = 3;  // 2
+}
+
+// ProfitInteractionScoreEntry: 收益互动分数中的单条记录
+message ProfitInteractionScoreEntry {
+  bytes  entry_data                    = 1;  // 16B: 含用户ID和分数
+}
+
+// ProfitInteractionScoreMessage: 收益互动分数更新
+message ProfitInteractionScoreMessage {
+  Common common                        = 1;
+  repeated ProfitInteractionScoreEntry score_entries = 2;  // 多条分数记录
+  uint32 field_3                       = 3;  // 1
+  uint64 target_user_id                = 4;
+  uint64 event_time                    = 5;  // 毫秒时间戳
+}
+
+// ItemShareMessage: 成就/物品分享消息
+message ItemShareMessage {
+  Common common                        = 1;
+  bytes  share_item                    = 2;
+  bytes  share_text                    = 3;
+  bytes  field_4                       = 4;
+}
+
+// ══════════════════════════════════════════════════════════════
+// 业务层 — 低价值/低频率消息（proto 占位定义）
+// ══════════════════════════════════════════════════════════════
+// 以下消息类型在 wire 上出现但频率低，仅含 common 头。
+
+// ResidentGuestMessage: 常驻访客消息（活跃老观众标识）
+message ResidentGuestMessage {
+  Common common                        = 1;
+  uint32 type                          = 2;
+  string extra                         = 101;  // 扩展数据
+}
+
+// LowPcuGuideConfig: 低在线引导配置
+message LowPcuGuideConfig {
+  uint32 field_2                       = 2;  // 2
+  uint32 field_3                       = 3;  // 1
+  uint32 field_4                       = 4;  // 3
+}
+
+// LowPcuGuideMessage: 低在线引导消息
+message LowPcuGuideMessage {
+  Common common                        = 1;
+  LowPcuGuideConfig guide_config       = 2;
+}
+// CommonDotDetail: 通用点消息详情（键值结构）
+message CommonDotDetail {
+  string common_dot_key                 = 1;  // "room_toolbar_anchor_more"
+  bytes  common_dot_value               = 2;
+}
+
+message CommonDotMessage {
+  Common common                        = 1;
+  CommonDotDetail detail                = 2;  // dot detail sub-message
+}
+message NotifyEffectMessage {
+  Common common                        = 1;
+  string effect_id                         = 2;  // 1732453488662963
+  Image image                         = 4;  // effect display image
+  bytes extra_data                         = 5;  // <8b fixed-size>
+  bytes effect_config                         = 6;  // <1107-1693b>
+  bytes extra_effect                         = 10;  // <39-50b>
+  string field_20                         = 20;  // 
+}
+message HotRoomMessage             { Common common = 1; }
+message ActivityEmojiGroupsMessage { Common common = 1; }
+message AnchorLinkmicSilenceMessage {
+  Common common                        = 1;
+  uint64 silence_type                         = 2;  // 2
+  string anchor_id                         = 3;  // 85902834442
+  string target_id                         = 4;  // 65305021017
+}
+message AssetMessage               { Common common = 1; }
+message AudioBgImgMessage {
+  Common common                        = 1;
+  bytes image_data                         = 2;  // <4806b image data>
+  int32 field_3                         = 3;  // 1
+  int32 field_4                         = 4;  // 3
+}
+message BackUpSeiMessage           { Common common = 1; }
+message BattleRankSeasonMessage {
+  Common common                        = 1;
+  bytes rank_data                         = 2;  // <3629-3644b>
+}
+message CommonToastMessage {
+  Common common                        = 1;
+  int32 field_3                         = 3;  // 1
+  int32 field_4                         = 4;  // 3
+  string color                         = 6;  // #000000
+  string bg_color                         = 7;  // #000000
+  int32 field_8                         = 8;  // 1
+}
+message ExhibitionChatMessage {
+  Common common                        = 1;
+  bytes display_config                         = 2;  // <402-647b>
+  int32 field_3                         = 3;  // 22
+  int32 field_4                         = 4;  // 3
+  int32 field_5                         = 5;  // 2
+  int32 field_6                         = 6;  // 1128
+  string field_7                         = 7;  // 
+}
+// GiftPlayEventMessage: 礼物播放事件（互动礼物动画状态）
+message GiftPlayEventMessage {
+  Common common                        = 1;
+  int32  event_type                    = 2;  // 事件类型
+  bytes  event_data                    = 3;  // JSON: {pet_type, asset_ids, base_info}
+}
+
+// GiftEffectGameState: 礼物效果游戏状态
+message GiftEffectGameState {
+  uint32 field_1                       = 1;
+}
+
+// GiftEffectGameMessage: 礼物效果游戏消息（礼物附带小游戏状态）
+message GiftEffectGameMessage {
+  Common common                        = 1;
+  int32  game_type                     = 2;  // 4
+  GiftEffectGameState game_state       = 8;
+}
+// HighlightCommentParticipant: 高亮评论中的用户信息
+message HighlightCommentParticipant {
+  uint64 user_id                      = 1;  // 7514485367081927738
+  string nick_name                    = 3;  // "句号。¹⁴⁹"
+}
+
+// HighlightCommentMessage: 高亮评论消息（被置顶/强调的聊天消息）
+message HighlightCommentMessage {
+  Common common                       = 1;
+  uint64 msg_id                       = 2;  // 消息ID
+  uint64 room_id                      = 3;  // 房间ID
+  uint64 timestamp                    = 4;  // 时间戳
+  int32  field_5                      = 5;  // 1
+  uint64 field_6                      = 6;
+  string content                      = 7;  // 评论内容
+  HighlightCommentParticipant user    = 8;  // 用户信息
+  int32  field_9                      = 9;  // 1
+  uint64 display_start               = 10; // 显示开始时间
+  uint64 display_end                 = 11; // 显示结束时间
+  int32  field_12                     = 12; // 1
+  uint64 field_14                     = 14;
+  string field_15                     = 15; // ".Tiger"
+}
+message InteractEffectMessage      { Common common = 1; }
+message LinkSettingNotifyMessage {
+  Common common                        = 1;
+  bytes setting_data                         = 2;  // sub-message (linked users)
+}
+message LotteryDrawResultEventMessage { Common common = 1; }
+message LotteryEventNewMessage     { Common common = 1; }
+
+// PreviewCjRpRedPacket: 红包详情信息
+message PreviewCjRpRedPacket {
+  string rp_id                         = 1;  // "RP3-260723105308092699312129269" 红包ID
+  uint64 start_time                    = 2;  // 开始时间戳
+  uint64 end_time                      = 3;  // 结束时间戳
+  int32  count                         = 4;  // 红包数量 (5)
+  int32  type                          = 5;  // 类型 (2)
+  string currency                      = 6;  // 币种 "Diamond"
+  string icon_url                      = 7;  // 红包图标URL
+  string status_text                   = 8;  // "红包发放中"
+  int32  total_amount                  = 9;  // 总额 (50)
+  int32  unit_amount                   = 11; // 单个金额 (50)
+}
+
+// PreviewCjRpMessage: 红包预览消息（CjRp = 超级红包）
+//   注意: common 在 field 2（非标准位置），红包信息在 field 1
+message PreviewCjRpMessage {
+  PreviewCjRpRedPacket red_packet_info = 1;
+  Common common                        = 2;
+}
+message LuckyBoxMessage            { Common common = 1; }
+message LuckyBoxEndMessage         { Common common = 1; }
+message LuckyBoxRewardMessage      { Common common = 1; }
+message LuckyBoxTempStatusMessage  { Common common = 1; }
+message PrivilegeScreenChatMessage {
+  Common common                        = 1;
+  bytes user_info                         = 2;  // <4643b user sub-msg>
+  string content                         = 3;  // 聊天内容
+  Image badge_image                         = 4;  // 角标图片
+  int32 field_5                         = 5;  // 3
+}
+message PrizeNoticeMessage {
+  Common common                        = 1;
+  int32 prize_type                         = 2;  // 7424
+  int32 field_6                         = 6;  // 3
+  int32 field_8                         = 8;  // 35
+}
+// 新发现消息类型（来自 Room 60829777 捕获）
+message AudioChatMessage {
+  Common common                        = 1;
+  User user                         = 2;  // 发送用户
+  string content                         = 3;  // 感谢@鹿上注意安全...
+  string audio_url                         = 4;  // 音频URL
+  int32 duration                         = 5;  // 3963ms
+  string field_6                         = 6;  // 
+  Image cover_img                         = 7;  // 封面图
+}
+message RoomIndicatorMessage {
+  Common common                        = 1;
+  int32 indicator_type                         = 2;  // 9
+  int32 indicator_sub_type                         = 3;  // 3
+  bytes indicator_data                         = 4;  // <422b sub-msg>
+}
+message TaskCenterEntranceMessage {
+  Common common                        = 1;
+  string entrance_json                         = 4;  // JSON config
+}
+message BattleUpdatePropCardTaskMessage {
+  Common common                        = 1;
+  string from_uid                         = 2;  // 7663517289115472946
+  string to_uid                         = 3;  // 7663517616778925108
+  string effect_json                         = 4;  // JSON: {anchor_effect_map, ...}
+}
+message BindingGiftMessage {
+  Common common                        = 1;
+  bytes binding_data                         = 2;  // <1243-2183b sub-msg>
+}
+message DecorationModifyMethod {
+  Common common                        = 1;
+  string deco_json                         = 2;  // JSON decoration list
+}
+message DecorationUpdateMessage {
+  Common common                        = 1;
+  string deco_data                         = 2;  // decoration data JSON
+}
+message LinkmicPlaymodeMessage {
+  Common common                        = 1;
+  string playmode_data                         = 5;  // playmode data
+}
+// LinkmicProfitMessage: 连麦收益消息
+message LinkmicProfitMessage {
+  Common common                        = 1;
+}
+// UserPrivilegeChangeMessage: 用户权限变更消息
+message UserPrivilegeChangeMessage {
+  Common common                        = 1;
+}
+// KeyValuePair: 通用键值对字段
+message KeyValuePair {
+  string key                           = 1;  // "link_game_id"
+  string value                         = 2;  // ""
+}
+
+// ProfitGameStatusMessage: 收益游戏状态消息（直播间小游戏状态）
+message ProfitGameStatusMessage {
+  Common common                        = 1;
+  int32  status                        = 2;  // 2
+  string game_title                    = 10; // JSON: {"title":"游戏连屏中"}
+  repeated KeyValuePair game_properties = 18; // 游戏属性键值对列表
+  uint64 related_user_id               = 19;
+}
+message RanklistAwardMessage {
+  Common common                        = 1;
+  int32 rank                         = 2;  // 7914
+  int32 field_3                         = 3;  // 1
+  int32 field_4                         = 4;  // 12
+  int32 field_9                         = 9;  // 20
+}
+message RoomCommentTopicMessage    { Common common = 1; }
+message RoomNotifyMessage {
+  Common common                        = 1;
+  string scheme_url                         = 2;  // sslocal://webcast_room
+  int32 notify_type                         = 3;  // 3
+  string notify_sub_type                         = 4;  // live_gift_notify
+  Image notify_icon                         = 5;  // 通知图标
+  bytes notify_extra                         = 6;  // <178-202b sub-msg>
+}
+message ToastMessage               { Common common = 1; }
+message TopEffectMessage           { Common common = 1; }
+
+// ══════════════════════════════════════════════════════════════
+// 辅助层 — WebSocket 握手/身份认证结构（逆向所得，含义不明）
+// ══════════════════════════════════════════════════════════════
+
+// Kk: 含义不明的加密辅助字段
+message Kk {
+  uint32 k                            = 14;
+}
+
+// ExtList: 扩展键值对
+message ExtList {
+  string key                          = 1;
+  string value                        = 2;
+}
+
+// RspF: 握手响应的未知子字段
+message RspF {
+  uint64 q1                           = 1;
+  uint64 q3                           = 3;
+  string q4                           = 4;
+  uint64 q5                           = 5;
+}
+
+// Rsp: 握手响应体
+message Rsp {
+  int32  a                            = 1;
+  int32  b                            = 2;
+  int32  c                            = 3;
+  string d                            = 4;
+  int32  e                            = 5;
+  RspF   f                            = 6;
+  string g                            = 7;
+  uint64 h                            = 10;
+  uint64 i                            = 11;
+  uint64 j                            = 13;
+}
+
+// SendMessageBody: 消息发送体
+message SendMessageBody {
+  string conversation_id              = 1;
+  uint32 conversation_type            = 2;
+  uint64 conversation_short_id        = 3;
+  string content                      = 4;
+  repeated ExtList ext                = 5;
+  uint32 message_type                 = 6;
+  string ticket                       = 7;
+  string client_message_id            = 8;
+}
+
+// PreMessage: 消息预处理结构（用于 WebSocket 握手认证）
+message PreMessage {
+  uint32 cmd                          = 1;
+  uint32 sequence_id                  = 2;
+  string sdk_version                  = 3;
+  string token                        = 4;
+  uint32 refer                        = 5;
+  uint32 inbox_type                   = 6;
+  string build_number                 = 7;
+  SendMessageBody send_message_body   = 8;
+  string aa                           = 9;
+  string device_platform              = 11;
+  repeated HeadersList headers        = 15;
+  uint32 auth_type                    = 18;
+  string biz                          = 21;
+  string access                       = 22;
+}
+
+// ══════════════════════════════════════════════════════════════
+// 业务层 — WebSocket method 到 proto message 的全映射
+// ══════════════════════════════════════════════════════════════
+// 注释标记了该消息类型是否被 parser.py 的 HANDLERS 活跃处理。
+// 共 78 种已知 method。
+
+// 全 78 种 method 与对应 proto message 映射（按功能分组）:
+
+// 核心消息（活跃解析 — 30种）:
+//   WebcastChatMessage              → ChatMessage
+//   WebcastEmojiChatMessage         → EmojiChatMessage
+//   WebcastScreenChatMessage        → ScreenChatMessage
+//   WebcastHotChatMessage           → HotChatMessage
+//   WebcastGiftMessage              → GiftMessage
+//   WebcastLightGiftMessage         → LightGiftMessage
+//   WebcastGiftSortMessage          → GiftSortMessage
+//   WebcastGiftPlayEventMessage     → GiftPlayEventMessage
+//   WebcastGiftEffectGameMessage    → GiftEffectGameMessage
+//   WebcastLikeMessage              → LikeMessage
+//   WebcastChatLikeMessage          → ChatLikeMessage
+//   WebcastMemberMessage            → MemberMessage
+//   WebcastSocialMessage            → SocialMessage
+//   WebcastFansclubMessage          → FansclubMessage
+//   WebcastControlMessage           → ControlMessage
+//   WebcastRoomMessage              → RoomMessage
+//   WebcastRoomStatsMessage         → RoomStatsMessage
+//   WebcastRoomUserSeqMessage       → RoomUserSeqMessage
+//   WebcastRoomRankMessage          → RoomRankMessage
+//   WebcastRoomStreamAdaptationMessage → RoomStreamAdaptationMessage
+//   WebcastRoomDataSyncMessage      → RoomDataSyncMessage
+//   WebcastInRoomBannerMessage      → InRoomBannerMessage
+//   WebcastRanklistHourEntranceMessage → RanklistHourEntranceMessage
+//   WebcastProfitInteractionScoreMessage → ProfitInteractionScoreMessage
+//   WebcastPreviewCjRpMessage       → PreviewCjRpMessage
+//   WebcastBattleStealDragonMessage → BattleStealDragonMessage
+//   WebcastBattleStatusMessage      → BattleStatusMessage
+//   WebcastBattleTeamTaskMessage    → BattleTeamTaskMessage
+//   WebcastBattleEffectContainerMessage → BattleEffectContainerMessage
+//   WebcastItemShareMessage         → ItemShareMessage
+//   WebcastLinkMessage              → LinkMessage
+
+// PK/连麦消息（活跃解析 — 10种）:
+//   WebcastLinkmicBattleMethod(s)           → LinkmicBattleMessage
+//   WebcastLinkmicBattleFinishMethod(s)     → LinkmicBattleFinishMessage
+//   WebcastLinkmicArmiesMethod(s)           → LinkmicArmiesMessage
+//   WebcastLinkmicPlayModeUpdateScoreMessage → LinkmicPlayModeUpdateScoreMessage
+//   WebcastLinkerContributeMessage           → LinkerContributeMessage
+//   WebcastBattleAuxiliaryMessage            → BattleAuxiliaryMessage
+//   WebcastBattleEndPunishMessage            → BattleEndPunishMessage
+//   WebcastBattlePowerContainerMessage       → BattlePowerContainerMessage
+
+// 低价值/计数消息（仅统计不解析 — 38种）:
+//   WebcastResidentGuestMessage           → ResidentGuestMessage
+//   WebcastLowPcuGuideMessage             → LowPcuGuideMessage
+//   WebcastProfitGameStatusMessage        → ProfitGameStatusMessage
+//   WebcastAssetEffectUtilMessage         → AssetEffectUtilMessage
+//   WebcastCommonDotMessage               → CommonDotMessage
+//   WebcastGiftUpdateMessage              → GiftUpdateMessage
+//   WebcastNotifyEffectMessage            → NotifyEffectMessage
+//   WebcastHotRoomMessage                 → HotRoomMessage
+//   WebcastActivityEmojiGroupsMessage     → ActivityEmojiGroupsMessage
+//   WebcastAnchorLinkmicSilenceMessage    → AnchorLinkmicSilenceMessage
+//   WebcastAssetMessage                   → AssetMessage
+//   WebcastAudioBgImgMessage              → AudioBgImgMessage
+//   WebcastBackupSeiMessage               → BackUpSeiMessage
+//   WebcastBattleRankSeasonMessage        → BattleRankSeasonMessage
+//   WebcastCommonToastMessage             → CommonToastMessage
+//   WebcastExhibitionChatMessage          → ExhibitionChatMessage
+//   WebcastHighlightCommentMessage        → HighlightCommentMessage
+//   WebcastInteractEffectMessage          → InteractEffectMessage
+//   WebcastLinkSettingNotifyMessage       → LinkSettingNotifyMessage
+//   WebcastLotteryDrawResultEventMessage  → LotteryDrawResultEventMessage
+//   WebcastLotteryEventNewMessage         → LotteryEventNewMessage
+//   WebcastLuckyBoxMessage                → LuckyBoxMessage
+//   WebcastLuckyBoxEndMessage             → LuckyBoxEndMessage
+//   WebcastLuckyBoxRewardMessage          → LuckyBoxRewardMessage
+//   WebcastLuckyBoxTempStatusMessage      → LuckyBoxTempStatusMessage
+//   WebcastPrivilegeScreenChatMessage     → PrivilegeScreenChatMessage
+//   WebcastPrizeNoticeMessage             → PrizeNoticeMessage
+//   WebcastRanklistAwardMessage           → RanklistAwardMessage
+//   WebcastRoomCommentTopicMessage        → RoomCommentTopicMessage
+//   WebcastRoomNotifyMessage              → RoomNotifyMessage
+//   WebcastToastMessage                   → ToastMessage
+//   WebcastTopEffectMessage               → TopEffectMessage
